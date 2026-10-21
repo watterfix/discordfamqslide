@@ -2,10 +2,20 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-KEYS = ["all", "online", "voice", "bots"]
+KEYS = ["all", "bots", "online", "afk", "contracts", "vehicles", "applications", "payments"]
 NAMES = {
-    "voice": {"all": "👥 Участники: {}", "online": "🟢 Онлайн: {}", "voice": "🎙 В голосе: {}", "bots": "🤖 Боты: {}"},
-    "text":  {"all": "все-участники-{}", "online": "онлайн-{}", "voice": "в-голосе-{}", "bots": "боты-{}"},
+    "voice": {
+        "all": "👥・Всего участников: {}", "bots": "🤖・Боты: {}", "online": "🟢・Сейчас онлайн: {}",
+        "afk": "🌙・В AFK: {}", "contracts": "📄・Активные контракты: {}",
+        "vehicles": "🚘・Машины в аренде: {}", "applications": "📨・Заявки на рассмотрении: {}",
+        "payments": "⏳・Ожидают проверки оплаты: {}",
+    },
+    "text": {
+        "all": "всего-участников-{}", "bots": "боты-{}", "online": "сейчас-онлайн-{}",
+        "afk": "в-afk-{}", "contracts": "активные-контракты-{}",
+        "vehicles": "машины-в-аренде-{}", "applications": "заявки-на-рассмотрении-{}",
+        "payments": "ожидают-проверки-оплаты-{}",
+    },
 }
 CATEGORY = "📊 Статистика сервера"
 
@@ -26,7 +36,20 @@ class Stats(commands.Cog):
             online = (await self.bot.fetch_guild(guild.id, with_counts=True)).approximate_presence_count
         except discord.HTTPException:
             online = None
-        return {"all": (guild.member_count or 0) - bots, "online": online, "voice": voice, "bots": bots}
+        db = self.bot.db
+        async def count(sql, params):
+            row = await db.fetchone(sql, params)
+            return int(row["c"] or 0) if row else 0
+        gid = guild.id
+        afk = await count("SELECT COUNT(*) c FROM afk WHERE guild_id=? AND status='active'", (gid,))
+        contracts = await count("SELECT COUNT(*) c FROM contracts WHERE guild_id=? AND status='open'", (gid,))
+        vehicles = await count("SELECT COUNT(*) c FROM vehicles WHERE guild_id=? AND status='in_use'", (gid,))
+        applications = await count("SELECT COUNT(*) c FROM applications WHERE guild_id=? AND status IN ('pending','reviewing','called')", (gid,))
+        payments = await count("SELECT COUNT(*) c FROM treasury_submissions WHERE guild_id=? AND status IN ('waiting_screenshot','pending_review')", (gid,))
+        payments += await count("SELECT COUNT(*) c FROM contract_submissions WHERE guild_id=? AND status IN ('waiting_screenshot','pending_review')", (gid,))
+        return {"all": max(0, (guild.member_count or 0) - bots), "online": online, "bots": bots,
+                "afk": afk, "contracts": contracts, "vehicles": vehicles,
+                "applications": applications, "payments": payments}
 
     async def update(self, guild):
         db = self.bot.db
@@ -47,15 +70,16 @@ class Stats(commands.Cog):
     async def _remove(self, guild):
         db = self.bot.db
         for k in [*KEYS, "category"]:
-            cid = await db.get_setting(guild.id, f"stats_{k}")
+            setting_key = "stats_category" if k == "category" else f"stats_{k}"
+            cid = await db.get_setting(guild.id, setting_key)
             ch = guild.get_channel(int(cid)) if cid else None
             if ch:
                 try: await ch.delete(reason="Статистика сервера")
                 except discord.HTTPException: pass
-            await db.execute("DELETE FROM settings WHERE guild_id=? AND key=?", (guild.id, f"stats_{k}"))
+            await db.execute("DELETE FROM settings WHERE guild_id=? AND key=?", (guild.id, setting_key))
         await db.execute("DELETE FROM settings WHERE guild_id=? AND key='stats_style'", (guild.id,))
 
-    @app_commands.command(name="статистика_создать", description="Создать каналы со статистикой сверху списка каналов")
+    @app_commands.command(name="статистика_создать", description="Создать 8 автоматически обновляемых счётчиков сервера")
     @app_commands.rename(style="стиль")
     @app_commands.describe(style="Вид каналов статистики")
     @app_commands.choices(style=[app_commands.Choice(name="Голосовые, с эмодзи (рекомендую)", value="voice"),
@@ -80,7 +104,7 @@ class Stats(commands.Cog):
         await db.set_setting(g.id, "stats_style", style)
         await self.update(g)
         await self.bot.log(g, "server", "Статистика сервера создана", f"Стиль: {style}", i.user, 0x57F287)
-        await i.followup.send("✅ Статистика создана сверху списка каналов. Счётчики обновляются раз в 10 минут.", ephemeral=True)
+        await i.followup.send("✅ Статистика создана сверху списка каналов. 8 счётчиков обновляются раз в 10 минут.", ephemeral=True)
 
     @app_commands.command(name="статистика_удалить", description="Удалить каналы со статистикой")
     @app_commands.default_permissions(manage_guild=True)

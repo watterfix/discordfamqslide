@@ -90,10 +90,12 @@ class TreasuryPaymentModal(discord.ui.Modal):
             return await i.response.send_message(f"Остаток вашего долга изменился: {money(due)}.", ephemeral=True)
         await i.response.defer(ephemeral=True, thinking=True)
         try:
-            channel = i.guild.get_channel(i.channel_id) if i.guild else None
+            setting_key = "payment_fines_channel" if self.kind in ("fine", "prepay_fine") else "payment_contracts_channel"
+            configured_id = await self.bot.db.get_setting(i.guild_id, setting_key)
+            channel = i.guild.get_channel(int(configured_id)) if configured_id else (i.guild.get_channel(i.channel_id) if i.guild else None)
             if channel is None or not hasattr(channel, "create_thread"):
-                raise RuntimeError("Канал не поддерживает создание тем")
-            thread = await channel.create_thread(name=f"Личный баланс · {KINDS[self.kind][0]} · {i.user.display_name}"[:95], type=discord.ChannelType.public_thread, auto_archive_duration=1440, reason="Проверка платежа личного баланса")
+                raise RuntimeError("Канал не настроен или не поддерживает создание веток")
+            thread = await channel.create_thread(name=f"{KINDS[self.kind][0]} · {i.user.display_name}"[:95], type=discord.ChannelType.public_thread, auto_archive_duration=1440, reason="Проверка платежа личного баланса")
         except (discord.HTTPException, AttributeError, RuntimeError):
             return await i.followup.send("Не удалось создать тему для скриншота. Проверьте права бота на создание тем.", ephemeral=True)
         note = self.note.value.strip()
@@ -287,7 +289,7 @@ class TreasuryReviewView(discord.ui.View):
             await self.bot.db.execute("INSERT INTO fine_payments(fine_id,user_id,amount,note,ts) VALUES(?,?,?,?,?)", (fine['id'], r['user_id'], r['amount'], r['note'], int(time.time())))
             note = f"{'Предоплата' if r['kind'] == 'prepay_fine' else 'Оплата'} штрафа №{fine['id']}"
             target_desc = f"Штраф №{fine['id']} · <@{fine['user_id']}>"
-            await self.bot.log(i.guild, "treasury", "Предоплата штрафа одобрена" if r['kind'] == 'prepay_fine' else "Оплата штрафа одобрена", f"{target_desc}\nСумма: {money(r['amount'])}\nПлательщик: <@{r['user_id']}>\nПроверил: {i.user.mention}", i.user, COLOR['ok'])
+            await self.bot.log(i.guild, "fines", "Предоплата штрафа одобрена" if r['kind'] == 'prepay_fine' else "Оплата штрафа одобрена", f"{target_desc}\nСумма: {money(r['amount'])}\nПлательщик: <@{r['user_id']}>\nПроверил: {i.user.mention}", i.user, COLOR['ok'])
             try: await self.bot.get_cog("Fines").refresh_panel(i.guild)
             except Exception: pass
         else:
@@ -348,6 +350,9 @@ class TreasuryReviewView(discord.ui.View):
             "INSERT INTO treasury_audit(guild_id,submission_id,payer_id,target_type,target_id,target_description,payment_kind,amount,note,reviewer_id,result,thread_id,created_at,resolved_at) VALUES(?,?,?,?,?,?,?,?,?,?, 'rejected',?,?,?)",
             (i.guild_id, self.submission_id, r['user_id'], target_type, r['target_id'], target_desc, KINDS[r['kind']][0], r['amount'], r['note'], i.user.id, r['thread_id'], r['created'], now))
         await self.bot.db.execute("UPDATE treasury_submissions SET status='rejected', reviewer_id=?, resolved_at=? WHERE id=?", (i.user.id, now, self.submission_id))
+        if target_type == "штраф":
+            try: await self.bot.log(i.guild, "fines", "Оплата штрафа отклонена", f"{target_desc}\nСумма: {money(r['amount'])}\nПлательщик: <@{r['user_id']}>\nПроверил: {i.user.mention}\nКомментарий: {r['note'] or '—'}", i.user, COLOR['bad'])
+            except Exception: pass
         await i.response.edit_message(content=f"❌ **ОТКЛОНЕНО · НЕ ВНЕСЕНО**\nТип: {KINDS[r['kind']][0]} №{r['target_id']}\nСумма: {money(r['amount'])}\nПроверил: {i.user.mention}. Можно создать новую заявку с корректным скриншотом.", view=None)
         thread = i.guild.get_thread(r['thread_id']) if r['thread_id'] else None
         if thread:

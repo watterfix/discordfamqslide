@@ -5,7 +5,7 @@ import media
 from utils import staff_only, staff_or_permission, make, COLOR
 
 ST = {"available": "🟢 Свободна", "in_use": "🟡 Занята", "repair": "🔧 В ремонте"}
-DEFAULT_HOURS, MIN_HOURS, MAX_HOURS = 2.0, 0.5, 24.0   # срок аренды машины по умолчанию / минимум / максимум (часы)
+DEFAULT_HOURS, MIN_HOURS, MAX_HOURS = 2.0, 0.5, 3.0   # максимальный срок аренды — 3 часа
 CARD = {"available": ("Свободен", COLOR["ok"]), "in_use": ("Занят", COLOR["warn"]), "repair": ("В ремонте", COLOR["bad"])}
 
 
