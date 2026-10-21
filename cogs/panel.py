@@ -507,6 +507,9 @@ class FinancialResetView(StaffView):
         g = i.guild_id
         choice = self.choice
         db = self.bot.db
+        # Acknowledge the component interaction before database updates and panel refreshes;
+        # Discord expires unacknowledged interactions after a few seconds.
+        await i.response.defer()
         try:
             if choice in ("fund", "all"):
                 await db.execute("DELETE FROM common_fund_transactions WHERE guild_id=?", (g,))
@@ -532,11 +535,13 @@ class FinancialResetView(StaffView):
                     except Exception: pass
             labels = {"fund":"статистика общака сброшена", "credited":"счётчик зачислений через панель сброшен", "fines":"активные штрафы отменены", "contracts":"открытые контракты закрыты", "all":"финансовые показатели сброшены, активные штрафы отменены, открытые контракты закрыты"}
             await self.bot.log(i.guild, "treasury", "Очистка финансовых данных", labels[choice], i.user, COLOR["bad"])
-            await i.response.edit_message(content=f"✅ Готово: {labels[choice]}. История заявок и платежей сохранена для аудита.", view=None)
+            await i.edit_original_response(content=f"✅ Готово: {labels[choice]}. История заявок и платежей сохранена для аудита.", view=None)
         except Exception:
             logging.exception("Ошибка очистки финансовых данных guild=%s choice=%s", g, choice)
-            if not i.response.is_done():
-                await i.response.send_message("❌ Не удалось выполнить очистку. Проверьте консоль бота.", ephemeral=True)
+            try:
+                await i.edit_original_response(content="⚠️ Очистка была запущена, но при обновлении данных/панели возникла ошибка. Проверьте консоль бота и состояние финансовых данных.", view=None)
+            except discord.HTTPException:
+                pass
 
 
 class StaffMenu(StaffView):

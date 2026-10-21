@@ -55,7 +55,14 @@ def due(c):
     if "funded" in c.keys() and not c["funded"]:
         return 0.0
     return family_share(c)
-def left(c):  return max(0.0, round(due(c) - c["paid"], 2))                               # остаток долга
+def left(c):
+    """Остаток долга с учётом точности отображения денежных сумм.
+
+    В интерфейсе суммы показываются целыми единицами валюты. Не оставляем
+    технический остаток вроде 0.2 как «долг 0» и не блокируем из-за него закрытие.
+    """
+    remainder = max(0.0, round(float(due(c) or 0) - float(c["paid"] or 0), 2))
+    return 0.0 if remainder < 0.5 else remainder
 
 def executor_debts(c):
     """Остаток долга семьи по каждому исполнителю: его гонорар * процент семьи.
@@ -297,7 +304,7 @@ class Contracts(commands.Cog):
         elif debt > 0:
             debt_label = f"```diff\n- {money(debt)}\n```"
         else:
-            debt_label = "```diff\n+ погашен\n```"
+            debt_label = "```diff\n+ погашено\n```"
         e.add_field(name="🔻 Долг", value=debt_label)
         if c["deadline"]:
             e.add_field(name="⏳ Срок", value=f"<t:{c['deadline']}:f> · <t:{c['deadline']}:R>", inline=False)
@@ -362,6 +369,11 @@ class Contracts(commands.Cog):
         cid = await self.bot.db.execute(
             "INSERT INTO contracts(guild_id,title,client,executor_id,executors,creator_id,amount,percent,deadline,created,fees,funded) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)",
             (i.guild_id, title, "", ids[0], pack(ids), i.user.id, amount, percent, None, now, fees_raw))
+        # Списываем предоплату контрактов исполнителей сразу при назначении на контракт.
+        try:
+            prepaid_used = await self.apply_prepaid(i.guild, cid)
+        except Exception:
+            prepaid_used = []
         warn = ""
         if photo:
             try: await media.save(self.bot.db, i.guild_id, "contract", cid, photo)
@@ -375,7 +387,8 @@ class Contracts(commands.Cog):
         await self.bot.log(i.guild, "contract", f"Контракт #{cid} создан",
                            f"{title} · сумма {money(amount)}\nИсполнители: {pings(c)}\nОжидает подтверждения оплаты.",
                            i.user, 0x57F287)
-        await i.followup.send(f"✅ Контракт #{cid} создан: {msg.jump_url}\nГонорары исполнителей: {money(fees_total)}\nСумма контракта: {money(amount)}\nДоля семьи ({percent:g}% от гонораров): {money(family_amount)}\nДолг исполнителей активируется после подтверждения оплаты скриншотом.{warn}", ephemeral=True)
+        prepaid_note = "\nПредоплата автоматически зачтена: " + ", ".join(f"<@{uid}> −{money(value)}" for uid, value in prepaid_used) if prepaid_used else ""
+        await i.followup.send(f"✅ Контракт #{cid} создан: {msg.jump_url}\nГонорары исполнителей: {money(fees_total)}\nСумма контракта: {money(amount)}\nДоля семьи ({percent:g}% от гонораров): {money(family_amount)}\nДолг исполнителей активируется после подтверждения оплаты скриншотом.{prepaid_note}{warn}", ephemeral=True)
 
     # ---------- исполнители ----------
     @app_commands.command(name="контракт_добавить_исполнителя", description="Добавить исполнителя в контракт")
@@ -433,7 +446,7 @@ class Contracts(commands.Cog):
         c = await self._get(i, contract_id)
         if not c: return
         debt = left(c)
-        if debt > 0 and not force:
+        if debt >= 0.5 and not force:
             return await i.response.send_message(f"Долг {money(debt)} не погашен. Используйте `force: True`, чтобы закрыть с долгом.", ephemeral=True)
         await self.bot.db.execute("UPDATE contracts SET status='closed' WHERE id=?", (contract_id,))
         await self.drop_card(i.guild, c)   # закрытый контракт не висит в канале (инфо: /контракт_инфо)

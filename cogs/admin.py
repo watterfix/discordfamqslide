@@ -7,7 +7,8 @@ from discord.ext import commands
 CHANNELS = {"log_channel": "Логи сервера", "applications_channel": "Рассмотрение заявок",
             "afk_channel": "Канал АФК", "fleet_channel": "Автопарк", "call_channel": "Обзвон: канал по умолчанию", "contracts_channel": "Контракты",
             "tempvoice_hub": "Временные войсы: канал «зайди, чтобы создать»",
-            "payment_fines_channel": "Ветки оплаты штрафов", "payment_contracts_channel": "Ветки оплаты контрактов"}
+            "payment_fines_channel": "Ветки оплаты штрафов", "payment_contracts_channel": "Ветки оплаты контрактов",
+            "payment_prepay_fines_channel": "Ветки предоплаты штрафов", "payment_prepay_contracts_channel": "Ветки предоплаты контрактов"}
 ROLES = {
     "accepted_role": "Роль при принятии заявки",
     "afk_role": "Роль АФК",

@@ -57,8 +57,8 @@ class TreasuryPaymentModal(discord.ui.Modal):
     def __init__(self, bot, kind, target_id, max_due):
         super().__init__(title=KINDS[kind][0], timeout=300)
         self.bot, self.kind, self.target_id, self.max_due = bot, kind, int(target_id), float(max_due)
-        self.amount = discord.ui.TextInput(label="Сумма платежа", placeholder="Например: 5000", max_length=20)
-        self.note = discord.ui.TextInput(label="Комментарий (необязательно)", required=False, max_length=150)
+        self.amount = discord.ui.TextInput(label=None, placeholder="Например: 5000", max_length=20)
+        self.note = discord.ui.TextInput(label=None, required=False, max_length=150)
         self.screenshot = discord.ui.FileUpload(min_values=1, max_values=1, required=True)
         self.add_item(discord.ui.Label(text="Сумма платежа", component=self.amount))
         self.add_item(discord.ui.Label(text="Комментарий (необязательно)", component=self.note))
@@ -68,7 +68,8 @@ class TreasuryPaymentModal(discord.ui.Modal):
         amount = parse_amount(self.amount.value)
         if amount is None:
             return await i.response.send_message("Укажите корректную сумму больше нуля.", ephemeral=True)
-        if amount > self.max_due + 0.005:
+        is_prepayment = self.kind in ("prepay_fine", "prepay")
+        if not is_prepayment and amount > self.max_due + 0.005:
             return await i.response.send_message(f"Сумма больше вашего личного остатка: {money(self.max_due)}.", ephemeral=True)
         files = self.screenshot.values
         if not files:
@@ -77,7 +78,10 @@ class TreasuryPaymentModal(discord.ui.Modal):
         if not ((image.content_type and image.content_type.startswith("image/")) or image.filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))):
             return await i.response.send_message("Прикрепите изображение PNG, JPG, WEBP или GIF.", ephemeral=True)
         target_id = self.target_id
-        if self.kind in ("fine", "prepay_fine"):
+        if is_prepayment:
+            due = amount
+            target_label = "Предоплата в личный баланс штрафов" if self.kind == "prepay_fine" else "Предоплата в личный баланс контрактов"
+        elif self.kind == "fine":
             row = await self.bot.db.fetchone("SELECT * FROM fines WHERE id=? AND guild_id=? AND user_id=?", (target_id, i.guild_id, i.user.id))
             if not row or int(row["cancelled"] or 0):
                 return await i.response.send_message("Этот штраф не найден в вашем личном балансе.", ephemeral=True)
@@ -99,8 +103,17 @@ class TreasuryPaymentModal(discord.ui.Modal):
             return await i.response.send_message(f"Остаток вашего долга изменился: {money(due)}.", ephemeral=True)
         await i.response.defer(ephemeral=True, thinking=True)
         try:
-            setting_key = "payment_fines_channel" if self.kind in ("fine", "prepay_fine") else "payment_contracts_channel"
+            if self.kind == "fine":
+                setting_key, fallback_key = "payment_fines_channel", None
+            elif self.kind == "contract":
+                setting_key, fallback_key = "payment_contracts_channel", None
+            elif self.kind == "prepay_fine":
+                setting_key, fallback_key = "payment_prepay_fines_channel", "payment_fines_channel"
+            else:
+                setting_key, fallback_key = "payment_prepay_contracts_channel", "payment_contracts_channel"
             configured_id = await self.bot.db.get_setting(i.guild_id, setting_key)
+            if not configured_id and fallback_key:
+                configured_id = await self.bot.db.get_setting(i.guild_id, fallback_key)
             channel = i.guild.get_channel(int(configured_id)) if configured_id else (i.guild.get_channel(i.channel_id) if i.guild else None)
             if channel is None or not hasattr(channel, "create_thread"):
                 raise RuntimeError("Канал не настроен или не поддерживает создание веток")
@@ -111,7 +124,7 @@ class TreasuryPaymentModal(discord.ui.Modal):
         cur = await self.bot.db.execute(
             "INSERT INTO treasury_submissions(guild_id,kind,target_id,user_id,amount,note,thread_id,status,created) VALUES(?,?,?,?,?,?,?,'waiting_screenshot',?)",
             (i.guild_id, self.kind, target_id, i.user.id, amount, note, thread.id, int(time.time())))
-        submission_id = getattr(cur, "lastrowid", None)
+        submission_id = cur if isinstance(cur, int) else getattr(cur, "lastrowid", None)
         if not submission_id:
             found = await self.bot.db.fetchone("SELECT id FROM treasury_submissions WHERE guild_id=? AND thread_id=? AND user_id=? ORDER BY id DESC LIMIT 1", (i.guild_id, thread.id, i.user.id))
             submission_id = found["id"] if found else None
@@ -141,7 +154,7 @@ class TreasuryPaymentModal(discord.ui.Modal):
         # Match the existing review embed/buttons without requiring the user to upload again.
         r = await self.bot.db.fetchone("SELECT * FROM treasury_submissions WHERE id=?", (submission_id,))
         title, _ = KINDS[r["kind"]]
-        if r["kind"] == "fine":
+        if r["kind"] in ("fine", "prepay_fine"):
             target = await self.bot.db.fetchone("SELECT * FROM fines WHERE id=?", (r["target_id"],))
             target_text = f"Штраф · {target['reason'] if target else '—'}"
         else:
@@ -187,13 +200,8 @@ class PrepaymentTypeSelect(discord.ui.Select):
         if i.user.id != self.user_id:
             return await i.response.send_message("Это меню предоплаты другого участника.", ephemeral=True)
         kind = self.values[0]
-        items = await personal_obligations(self.bot, i.guild_id, i.user.id, kind)
-        if not items:
-            label = "штрафов" if kind == "prepay_fine" else "долгов по контрактам"
-            return await i.response.send_message(f"В вашем личном балансе нет неоплаченных {label} для предоплаты.", ephemeral=True)
-        await i.response.send_message(
-            "**Предоплата · ваш личный баланс**\nВыберите обязательство. Вводить номера штрафов и контрактов не нужно.",
-            view=PersonalObligationView(self.bot, kind, i.user.id, items), ephemeral=True)
+        # Предоплата — депозит до появления штрафа/контракта, поэтому не выбираем обязательство.
+        await i.response.send_modal(TreasuryPaymentModal(self.bot, kind, 0, 1e12))
 
 
 class PrepaymentTypeView(discord.ui.View):
@@ -314,7 +322,15 @@ class TreasuryReviewView(discord.ui.View):
         r = await self.bot.db.fetchone("SELECT * FROM treasury_submissions WHERE id=? AND guild_id=?", (self.submission_id, i.guild_id))
         if not r or r['status'] != 'pending_review':
             return await i.response.send_message("Заявка уже обработана или скриншот не приложен.", ephemeral=True)
-        if r['kind'] in ('fine', 'prepay_fine'):
+        if r['kind'] in ('prepay_fine', 'prepay'):
+            table = "prepaid_fines" if r['kind'] == 'prepay_fine' else "prepaid"
+            await self.bot.db.execute(
+                f"INSERT INTO {table}(guild_id,user_id,balance) VALUES(?,?,?) ON CONFLICT(guild_id,user_id) DO UPDATE SET balance=balance+excluded.balance",
+                (i.guild_id, r['user_id'], r['amount']))
+            note = "Предоплата штрафов в личный баланс" if r['kind'] == 'prepay_fine' else "Предоплата контрактов в личный баланс"
+            target_desc = f"Личный баланс <@{r['user_id']}> · {note}"
+            await self.bot.log(i.guild, "treasury", "Предоплата одобрена", f"{target_desc}\nСумма: {money(r['amount'])}\nПроверил: {i.user.mention}", i.user, COLOR['ok'])
+        elif r['kind'] == 'fine':
             fine = await self.bot.db.fetchone("SELECT * FROM fines WHERE id=? AND guild_id=?", (r['target_id'], i.guild_id))
             if not fine: return await i.response.send_message("Штраф не найден.", ephemeral=True)
             due = max(0.0, float(fine['amount']) - float(fine['paid'] or 0))
@@ -326,7 +342,7 @@ class TreasuryReviewView(discord.ui.View):
             await self.bot.log(i.guild, "fines", "Предоплата штрафа одобрена" if r['kind'] == 'prepay_fine' else "Оплата штрафа одобрена", f"{target_desc}\nСумма: {money(r['amount'])}\nПлательщик: <@{r['user_id']}>\nПроверил: {i.user.mention}", i.user, COLOR['ok'])
             try: await self.bot.get_cog("Fines").refresh_panel(i.guild)
             except Exception: pass
-        else:
+        elif r['kind'] == 'contract':
             c = await self.bot.db.fetchone("SELECT * FROM contracts WHERE id=? AND guild_id=?", (r['target_id'], i.guild_id))
             if not c: return await i.response.send_message("Контракт не найден.", ephemeral=True)
             cog = self.bot.get_cog("Contracts")
@@ -346,7 +362,7 @@ class TreasuryReviewView(discord.ui.View):
             "INSERT INTO common_fund_transactions(guild_id,user_id,direction,amount,note,ts) VALUES(?,?,'in',?,?,?)",
             (i.guild_id, r['user_id'], r['amount'], note, int(time.time())))
         now = int(time.time())
-        target_type = "штраф" if r['kind'] in ('fine', 'prepay_fine') else "контракт"
+        target_type = "предоплата штрафов" if r['kind'] == 'prepay_fine' else ("предоплата контрактов" if r['kind'] == 'prepay' else ("штраф" if r['kind'] == 'fine' else "контракт"))
         await self.bot.db.execute(
             "INSERT INTO treasury_audit(guild_id,submission_id,payer_id,target_type,target_id,target_description,payment_kind,amount,note,reviewer_id,result,thread_id,created_at,resolved_at) VALUES(?,?,?,?,?,?,?,?,?,?, 'approved',?,?,?)",
             (i.guild_id, self.submission_id, r['user_id'], target_type, r['target_id'], target_desc, KINDS[r['kind']][0], r['amount'], r['note'], i.user.id, r['thread_id'], r['created'], now))
@@ -373,7 +389,7 @@ class TreasuryReviewView(discord.ui.View):
         if not r or r['status'] != 'pending_review':
             return await i.response.send_message("Заявка уже обработана или скриншот не приложен.", ephemeral=True)
         now = int(time.time())
-        target_type = "штраф" if r['kind'] in ('fine', 'prepay_fine') else "контракт"
+        target_type = "предоплата штрафов" if r['kind'] == 'prepay_fine' else ("предоплата контрактов" if r['kind'] == 'prepay' else ("штраф" if r['kind'] == 'fine' else "контракт"))
         if target_type == "штраф":
             target = await self.bot.db.fetchone("SELECT reason,user_id FROM fines WHERE id=?", (r['target_id'],))
             target_desc = f"Штраф: {target['reason']} · участник <@{target['user_id']}>" if target else f"Штраф #{r['target_id']}"

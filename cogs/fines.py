@@ -1,5 +1,6 @@
 import time
 import logging
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -96,6 +97,22 @@ class FineDetailsModal(discord.ui.Modal, title="Выдать штраф"):
             logging.exception("Не удалось записать штраф в БД (guild=%s, user=%s)", i.guild_id, self.member.id)
             return await i.followup.send("❌ Не удалось сохранить штраф в базе данных. Ошибка записана в консоль бота.", ephemeral=True)
 
+        # Автоматически списываем доступную предоплату штрафов с нового штрафа.
+        prepaid_row = await self.bot.db.fetchone("SELECT balance FROM prepaid_fines WHERE guild_id=? AND user_id=?", (i.guild_id, self.member.id))
+        prepaid_balance = max(0.0, float(prepaid_row["balance"] or 0)) if prepaid_row else 0.0
+        prepaid_used = round(min(amount, prepaid_balance), 2)
+        prepaid_left = round(max(0.0, prepaid_balance - prepaid_used), 2)
+        if prepaid_used > 0:
+            await self.bot.db.execute("UPDATE prepaid_fines SET balance=? WHERE guild_id=? AND user_id=?", (prepaid_left, i.guild_id, self.member.id))
+            await self.bot.db.execute("UPDATE fines SET paid=COALESCE(paid,0)+? WHERE id=?", (prepaid_used, fine_id))
+            await self.bot.db.execute("INSERT INTO fine_payments(fine_id,user_id,amount,note,ts) VALUES(?,?,?,?,?)", (fine_id, self.member.id, prepaid_used, "Автоматическое списание предоплаты штрафов", int(time.time())))
+            try:
+                issuer = i.guild.get_member(i.user.id)
+                if issuer:
+                    await issuer.send(f"✅ Штраф №{fine_id}, выданный {self.member.mention}, автоматически погашен предоплатой на **{money(prepaid_used)}**. Остаток предоплаты штрафов у участника: **{money(prepaid_left)}**. " + (f"Остаток самого штрафа: **{money(amount-prepaid_used)}**." if prepaid_used < amount else "Штраф полностью оплачен."))
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+
         # Сохранение штрафа — основная операция. Ошибка обновления панели/логов
         # не должна создавать впечатление, что штраф не выдан.
         try:
@@ -109,7 +126,12 @@ class FineDetailsModal(discord.ui.Modal, title="Выдать штраф"):
         except Exception:
             logging.exception("Штраф #%s сохранён, но лог не записан", fine_id)
         try:
-            await self.member.send(f"⚖️ Вам выписан штраф на сервере **{i.guild.name}**.\n**Сумма:** {money(amount)}\n**Причина:** {reason}\n**Кто выписал:** {i.user.mention}\nОплатить штраф можно через панель казны на сервере.")
+            paid_now = prepaid_used
+            msg = f"⚖️ Вам выписан штраф на сервере **{i.guild.name}**.\n**Сумма:** {money(amount)}\n**Причина:** {reason}\n**Кто выписал:** {i.user.mention}\n"
+            if paid_now > 0:
+                msg += f"Автоматически погашено из предоплаты: **{money(paid_now)}**.\nОстаток предоплаты штрафов: **{money(prepaid_left)}**.\n"
+            msg += (f"Осталось оплатить штраф: **{money(amount-paid_now)}**.\n" if paid_now < amount else "Штраф полностью погашен предоплатой.\n") + "Оплатить остаток можно через панель казны на сервере."
+            await self.member.send(msg)
         except (discord.Forbidden, discord.HTTPException):
             logging.info("Не удалось отправить ЛС о штрафе участнику %s", self.member.id)
         await i.followup.send(f"✅ Штраф на **{money(amount)}** выдан участнику {self.member.mention}.", ephemeral=True)
@@ -181,6 +203,22 @@ class Fines(commands.Cog):
 
     async def cog_load(self):
         self.bot.add_view(FinePanelView(self.bot))
+        self._panel_refresh_task = asyncio.create_task(self._refresh_panels_loop())
+
+    def cog_unload(self):
+        task = getattr(self, "_panel_refresh_task", None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _refresh_panels_loop(self):
+        await self.bot.wait_until_ready()
+        while not self.bot.is_closed():
+            for guild in list(self.bot.guilds):
+                try:
+                    await self.refresh_panel(guild)
+                except Exception:
+                    logging.exception("Не удалось автоматически обновить панель штрафов на сервере %s", guild.id)
+            await asyncio.sleep(60)
 
     async def refresh_panel(self, guild):
         channel_id = await self.bot.db.get_setting(guild.id, "fines_panel_channel_id")
@@ -199,15 +237,26 @@ class Fines(commands.Cog):
         lines = []
         for row in rows:
             ts = int(row["ts"])
+            amount = max(0.0, float(row["amount"] or 0))
+            paid = max(0.0, float(row["paid"] or 0))
+            cancelled = bool(int(row["cancelled"] or 0))
+            if cancelled:
+                status = "🚫 **СНЯТ**"
+            elif paid + 0.005 >= amount:
+                status = "✅ **ПОГАШЕН**"
+            elif paid > 0.005:
+                status = f"🟠 **ЧАСТИЧНО ПОГАШЕН** · осталось {money(amount - paid)}"
+            else:
+                status = f"🔴 **АКТИВЕН** · долг {money(amount - paid)}"
             lines.append(
-                f"### ⚖️ Штраф №{row['id']} · {money(row['amount'])}{' · 🚫 СНЯТ' if int(row['cancelled'] or 0) else ''}\n"
+                f"### ⚖️ Штраф №{row['id']} · {money(amount)} · {status}\n"
                 f"**Кому:** <@{row['user_id']}>\n"
                 f"**Причина:** {row['reason']}\n"
                 f"**Выдал:** <@{row['issuer_id']}> · <t:{ts}:f>"
             )
         description = "Нажмите **«Выдать штраф»**, выберите участника из списка и заполните сумму с причиной. Выдавать штрафы могут руководство и роли с разрешением `Выдавать штрафы`.\n\n"
         description += "\n\n━━━━━━━━━━━━━━━━━━\n\n".join(lines) if lines else "Пока штрафов нет."
-        embed = make("⚖️ Реестр штрафов", description[:4000], COLOR["bad"], footer="Последние 10 штрафов · обновляется автоматически")
+        embed = make("⚖️ Реестр штрафов", description[:4000], COLOR["bad"], footer="Последние 10 штрафов · автообновление раз в 60 секунд")
         try:
             await message.edit(content=None, embed=embed, view=FinePanelView(self.bot), allowed_mentions=discord.AllowedMentions.none())
         except discord.HTTPException:
