@@ -54,12 +54,15 @@ async def personal_obligations(bot, guild_id, user_id, kind):
 
 
 class TreasuryPaymentModal(discord.ui.Modal):
-    amount = discord.ui.TextInput(label="Сумма платежа", placeholder="Например: 5000", max_length=20)
-    note = discord.ui.TextInput(label="Комментарий (необязательно)", required=False, max_length=150)
-
     def __init__(self, bot, kind, target_id, max_due):
+        super().__init__(title=KINDS[kind][0], timeout=300)
         self.bot, self.kind, self.target_id, self.max_due = bot, kind, int(target_id), float(max_due)
-        super().__init__(title=KINDS[kind][0])
+        self.amount = discord.ui.TextInput(label="Сумма платежа", placeholder="Например: 5000", max_length=20)
+        self.note = discord.ui.TextInput(label="Комментарий (необязательно)", required=False, max_length=150)
+        self.screenshot = discord.ui.FileUpload(min_values=1, max_values=1, required=True)
+        self.add_item(discord.ui.Label(text="Сумма платежа", component=self.amount))
+        self.add_item(discord.ui.Label(text="Комментарий (необязательно)", component=self.note))
+        self.add_item(discord.ui.Label(text="Скриншот оплаты (обязательно)", description="Прикрепите изображение прямо здесь", component=self.screenshot))
 
     async def on_submit(self, i: discord.Interaction):
         amount = parse_amount(self.amount.value)
@@ -67,6 +70,12 @@ class TreasuryPaymentModal(discord.ui.Modal):
             return await i.response.send_message("Укажите корректную сумму больше нуля.", ephemeral=True)
         if amount > self.max_due + 0.005:
             return await i.response.send_message(f"Сумма больше вашего личного остатка: {money(self.max_due)}.", ephemeral=True)
+        files = self.screenshot.values
+        if not files:
+            return await i.response.send_message("Прикрепите скриншот оплаты перед отправкой.", ephemeral=True)
+        image = files[0]
+        if not ((image.content_type and image.content_type.startswith("image/")) or image.filename.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".gif"))):
+            return await i.response.send_message("Прикрепите изображение PNG, JPG, WEBP или GIF.", ephemeral=True)
         target_id = self.target_id
         if self.kind in ("fine", "prepay_fine"):
             row = await self.bot.db.fetchone("SELECT * FROM fines WHERE id=? AND guild_id=? AND user_id=?", (target_id, i.guild_id, i.user.id))
@@ -97,12 +106,15 @@ class TreasuryPaymentModal(discord.ui.Modal):
                 raise RuntimeError("Канал не настроен или не поддерживает создание веток")
             thread = await channel.create_thread(name=f"{KINDS[self.kind][0]} · {i.user.display_name}"[:95], type=discord.ChannelType.public_thread, auto_archive_duration=1440, reason="Проверка платежа личного баланса")
         except (discord.HTTPException, AttributeError, RuntimeError):
-            return await i.followup.send("Не удалось создать тему для скриншота. Проверьте права бота на создание тем.", ephemeral=True)
+            return await i.followup.send("Не удалось создать тему для оплаты. Проверьте права бота на создание тем.", ephemeral=True)
         note = self.note.value.strip()
-        await self.bot.db.execute(
+        cur = await self.bot.db.execute(
             "INSERT INTO treasury_submissions(guild_id,kind,target_id,user_id,amount,note,thread_id,status,created) VALUES(?,?,?,?,?,?,?,'waiting_screenshot',?)",
             (i.guild_id, self.kind, target_id, i.user.id, amount, note, thread.id, int(time.time())))
-        # Ping configured role(s) in the payment thread; fine and contract roles are configured separately.
+        submission_id = getattr(cur, "lastrowid", None)
+        if not submission_id:
+            found = await self.bot.db.fetchone("SELECT id FROM treasury_submissions WHERE guild_id=? AND thread_id=? AND user_id=? ORDER BY id DESC LIMIT 1", (i.guild_id, thread.id, i.user.id))
+            submission_id = found["id"] if found else None
         setting_key = "treasury_fine_ping_roles" if self.kind in ("fine", "prepay_fine") else "treasury_contract_ping_roles"
         raw_roles = await self.bot.db.get_setting(i.guild_id, setting_key)
         role_ids = []
@@ -110,14 +122,36 @@ class TreasuryPaymentModal(discord.ui.Modal):
             for value in str(raw_roles).split(","):
                 try:
                     role_id = int(value.strip())
-                    if i.guild.get_role(role_id):
-                        role_ids.append(role_id)
+                    if i.guild.get_role(role_id): role_ids.append(role_id)
                 except (TypeError, ValueError):
                     continue
         role_mentions = " ".join(f"<@&{rid}>" for rid in role_ids)
-        content = (f"{role_mentions}\n" if role_mentions else "") + f"📸 {i.user.mention}, прикрепите **скриншот платежа** одним сообщением.\nЛичный баланс: **{target_label}**\nСумма: **{money(amount)}**\nОстаток до оплаты: **{money(due)}**\nКомментарий: {note or '—'}\nПлатёж будет учтён только после одобрения."
-        await thread.send(content, allowed_mentions=discord.AllowedMentions(users=True, roles=True, everyone=False))
-        await i.followup.send(f"Создана тема для оплаты вашего личного долга: {thread.mention}. Платёж будет учтён после одобрения.", ephemeral=True)
+        content = (f"{role_mentions}\n" if role_mentions else "") + f"📸 **Заявка на оплату со скриншотом**\nПлательщик: {i.user.mention}\nЛичный баланс: **{target_label}**\nСумма: **{money(amount)}**\nОстаток до оплаты: **{money(due)}**\nКомментарий: {note or '—'}\nСкриншот прикреплён к заявке ниже."
+        try:
+            proof_message = await thread.send(content, file=await image.to_file(), allowed_mentions=discord.AllowedMentions(users=True, roles=True, everyone=False))
+            if submission_id:
+                # Reuse the existing review workflow; no second screenshot message is needed.
+                await self.bot.db.execute("UPDATE treasury_submissions SET status='pending_review', screenshot_url=?, screenshot_message_id=? WHERE id=?", (proof_message.attachments[0].url if proof_message.attachments else image.url, proof_message.id, submission_id))
+                await self._send_payment_review(i.guild, thread, proof_message, proof_message.attachments[0] if proof_message.attachments else image, submission_id)
+        except Exception:
+            return await i.followup.send(f"Тема создана: {thread.mention}, но не удалось отправить скриншот. Попробуйте ещё раз или обратитесь к администрации.", ephemeral=True)
+        await i.followup.send(f"✅ Заявка и скриншот отправлены на проверку: {thread.mention}. Платёж будет учтён только после одобрения.", ephemeral=True)
+
+    async def _send_payment_review(self, guild, thread, message, image, submission_id):
+        # Match the existing review embed/buttons without requiring the user to upload again.
+        r = await self.bot.db.fetchone("SELECT * FROM treasury_submissions WHERE id=?", (submission_id,))
+        title, _ = KINDS[r["kind"]]
+        if r["kind"] == "fine":
+            target = await self.bot.db.fetchone("SELECT * FROM fines WHERE id=?", (r["target_id"],))
+            target_text = f"Штраф · {target['reason'] if target else '—'}"
+        else:
+            target = await self.bot.db.fetchone("SELECT * FROM contracts WHERE id=?", (r["target_id"],))
+            target_text = f"Контракт · {target['title'] if target else '—'}"
+        e = make(f"📸 Проверка казны · {title}", f"**Объект:** {target_text}\n**Сумма:** {money(r['amount'])}\n**Отправил:** <@{r['user_id']}>\n**Комментарий:** {r['note'] or '—'}\n**Скриншот:** [Открыть изображение]({image.url})\n\nНазначенная роль должна одобрить или отклонить платёж.", COLOR['warn'])
+        e.set_image(url=image.url)
+        msg = await thread.send(embed=e, view=TreasuryReviewView(self.bot, submission_id))
+        await self.bot.db.execute("UPDATE treasury_submissions SET screenshot_url=?, screenshot_message_id=?, review_message_id=?, status='pending_review' WHERE id=?", (image.url, message.id, msg.id, submission_id))
+        self.bot.add_view(TreasuryReviewView(self.bot, submission_id), message_id=msg.id)
 
 
 class PersonalObligationSelect(discord.ui.Select):

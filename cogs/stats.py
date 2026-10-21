@@ -69,6 +69,17 @@ class Stats(commands.Cog):
 
     async def _remove(self, guild):
         db = self.bot.db
+        # Remove legacy stats categories too (older versions used a separate Server Stats category).
+        # Only categories clearly named as statistics are touched.
+        for category in list(guild.categories):
+            lowered = category.name.casefold()
+            if ("статистик" in lowered or "server stats" in lowered or "server-stat" in lowered):
+                try:
+                    for child in list(category.channels):
+                        await child.delete(reason="Обновление статистики сервера")
+                    await category.delete(reason="Обновление статистики сервера")
+                except discord.HTTPException:
+                    pass
         for k in [*KEYS, "category"]:
             setting_key = "stats_category" if k == "category" else f"stats_{k}"
             cid = await db.get_setting(guild.id, setting_key)
@@ -104,7 +115,7 @@ class Stats(commands.Cog):
         await db.set_setting(g.id, "stats_style", style)
         await self.update(g)
         await self.bot.log(g, "server", "Статистика сервера создана", f"Стиль: {style}", i.user, 0x57F287)
-        await i.followup.send("✅ Статистика создана сверху списка каналов. 8 счётчиков обновляются раз в 10 минут.", ephemeral=True)
+        await i.followup.send("✅ Статистика создана в одной категории. Все 8 счётчиков обновляются раз в минуту. Старые категории статистики удалены.", ephemeral=True)
 
     @app_commands.command(name="статистика_удалить", description="Удалить каналы со статистикой")
     @app_commands.default_permissions(manage_guild=True)
@@ -114,7 +125,7 @@ class Stats(commands.Cog):
         await self.bot.log(i.guild, "server", "Статистика сервера удалена", "", i.user, 0xED4245)
         await i.followup.send("🗑 Каналы статистики удалены.", ephemeral=True)
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(minutes=1)
     async def refresh(self):
         for g in self.bot.guilds:
             await self.update(g)
