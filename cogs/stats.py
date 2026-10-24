@@ -101,7 +101,6 @@ class Stats(commands.Cog):
     @app_commands.describe(style="Вид каналов статистики")
     @app_commands.choices(style=[app_commands.Choice(name="Голосовые, с эмодзи (рекомендую)", value="voice"),
                                  app_commands.Choice(name="Текстовые, как на скриншоте", value="text")])
-    @app_commands.default_permissions()
     async def setup_stats(self, i, style: app_commands.Choice[str] = None):
         await i.response.defer(ephemeral=True)
         style, g, db = (style.value if style else "voice"), i.guild, self.bot.db
@@ -124,7 +123,6 @@ class Stats(commands.Cog):
         await i.followup.send("✅ Статистика создана в одной категории. Все 8 счётчиков обновляются раз в минуту. Старые категории статистики удалены.", ephemeral=True)
 
     @app_commands.command(name="статистика_удалить", description="Удалить каналы со статистикой")
-    @app_commands.default_permissions()
     async def remove_stats(self, i):
         await i.response.defer(ephemeral=True)
         await self._remove(i.guild)

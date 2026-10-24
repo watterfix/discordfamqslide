@@ -8,6 +8,20 @@ load_dotenv()
 from database import DB
 from utils import make, CAT
 
+ADMIN_ONLY_COMMANDS = {
+    "настроить_канал", "настроить_доступ_панели", "настроить_роль", "настроить_тег_оплаты",
+    "настроить_логи", "настроить_лог_канал", "настроить_процент", "настроить_неактивность",
+    "статистика_создать", "статистика_удалить", "заявки_панель", "заявки_роль_тег",
+    "заявки_открыть", "заявки_закрыть", "заявки_статистика", "срок_веток_оплат", "лог_оплат",
+    "общак_панель", "казна_панель", "логи", "взп_панель", "созыв_панель", "созыв",
+    "фото_машины", "фото_контракта", "фото_заявки", "фото_участника", "фото_удалить",
+    "штрафы_панель", "штрафы_снять", "штраф_выдать", "лог_штрафов", "участник_внести",
+    "участник_убрать", "общак_выдать", "неактивные", "контракты_панель",
+    "временные_войсы_панель", "афк_панель", "афк_вытащить", "контракт_добавить_исполнителя",
+    "контракт_убрать_исполнителя", "контракт_штраф", "контракт_закрыть", "машина_добавить",
+    "машина_списать", "машина_статус", "автопарк_пересоздать", "машина_история",
+}
+
 COGS = ["admin", "logs", "applications", "afk", "fleet", "contracts", "tempvoice", "summon", "panel", "family", "activity", "photos", "stats", "help", "fines", "treasury", "vzp"]
 
 class Tree(app_commands.CommandTree):
@@ -15,6 +29,20 @@ class Tree(app_commands.CommandTree):
         if not i.guild:
             await i.response.send_message("Команды работают только на сервере.", ephemeral=True)
             return False
+        # Эти slash-команды относятся к администрированию. Проверяем их на уровне
+        # CommandTree, чтобы ни одна команда не обходила ограничения из-за
+        # отсутствующего декоратора в конкретном cog.
+        command_name = getattr(i.command, "name", None)
+        if command_name in ADMIN_ONLY_COMMANDS:
+            member = i.user
+            is_owner = getattr(member, "id", None) in Bot.OWNER_IDS
+            is_admin = bool(getattr(getattr(member, "guild_permissions", None), "administrator", False)
+                            or getattr(getattr(member, "guild_permissions", None), "manage_guild", False))
+            if not (is_owner or is_admin):
+                await i.response.send_message(
+                    "🔒 Эта slash-команда доступна только владельцу бота и администраторам сервера.",
+                    ephemeral=True)
+                return False
         return True
 
     async def on_error(self, i, error):

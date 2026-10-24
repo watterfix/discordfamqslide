@@ -20,8 +20,8 @@ class FineRemovalSelect(discord.ui.Select):
         super().__init__(placeholder="Выберите конкретный штраф для снятия…", min_values=1, max_values=1, options=options)
 
     async def callback(self, i: discord.Interaction):
-        if not (await self.bot.is_staff(i.user) or i.user.guild_permissions.manage_guild):
-            return await i.response.send_message("🔒 Снимать штрафы могут только руководство и администраторы.", ephemeral=True)
+        if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
+            return await i.response.send_message("🔒 Снимать штрафы могут только владелец бота и администраторы сервера.", ephemeral=True)
         fine_id = int(self.values[0])
         row = await self.bot.db.fetchone("SELECT * FROM fines WHERE id=? AND guild_id=? AND user_id=? AND COALESCE(cancelled,0)=0", (fine_id, i.guild_id, self.target_member.id))
         if not row:
@@ -76,8 +76,8 @@ class FineDetailsModal(discord.ui.Modal, title="Выдать штраф"):
         self.bot, self.member = bot, member
 
     async def on_submit(self, i: discord.Interaction):
-        if not (await self.bot.is_staff(i.user) or await self.bot.has_role_permission(i.user, "fine_issue")):
-            return await i.response.send_message("🔒 У вашей роли нет права выдавать штрафы.", ephemeral=True)
+        if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
+            return await i.response.send_message("🔒 Выдавать штрафы через slash-команду могут только владелец бота и администраторы сервера.", ephemeral=True)
         try:
             amount = float(self.amount_input.value.strip().replace(" ", "").replace(",", "."))
             if not (0 < amount <= 1e12):
@@ -152,8 +152,8 @@ class FineMemberSelect(discord.ui.UserSelect):
     async def callback(self, i: discord.Interaction):
         if i.user.id != self.issuer_id:
             return await i.response.send_message("Эта форма принадлежит другому пользователю.", ephemeral=True)
-        if not (await self.bot.is_staff(i.user) or await self.bot.has_role_permission(i.user, "fine_issue")):
-            return await i.response.send_message("🔒 У вашей роли нет права выдавать штрафы.", ephemeral=True)
+        if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
+            return await i.response.send_message("🔒 Выдавать штрафы через slash-команду могут только владелец бота и администраторы сервера.", ephemeral=True)
         selected = self.values[0]
         if not i.guild:
             return await i.response.send_message("Выбор участника доступен только на сервере.", ephemeral=True)
@@ -173,8 +173,8 @@ class FinePanelView(discord.ui.View):
 
     @discord.ui.button(label="Выдать штраф", emoji="⚖️", style=discord.ButtonStyle.danger, custom_id="fines:issue")
     async def issue(self, i: discord.Interaction, button: discord.ui.Button):
-        if not (await self.bot.is_staff(i.user) or await self.bot.has_role_permission(i.user, "fine_issue")):
-            return await i.response.send_message("🔒 У вашей роли нет права выдавать штрафы.", ephemeral=True)
+        if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
+            return await i.response.send_message("🔒 Выдавать штрафы через slash-команду могут только владелец бота и администраторы сервера.", ephemeral=True)
         await i.response.send_message("**Шаг 1/2 — выберите участника** из списка ниже. ID и тег вводить не нужно.", view=FineMemberPicker(self.bot, i.user.id), ephemeral=True)
 
     @discord.ui.button(label="Уведомить должников", emoji="🔔", style=discord.ButtonStyle.secondary, custom_id="fines:notify_debtors")
@@ -277,8 +277,8 @@ class Fines(commands.Cog):
     @app_commands.rename(member="участник")
     @app_commands.describe(member="У кого снять один или все штрафы")
     async def remove_fines(self, i: discord.Interaction, member: discord.Member):
-        if not (await self.bot.is_staff(i.user) or i.user.guild_permissions.manage_guild):
-            return await i.response.send_message("🔒 Снимать штрафы могут только руководство и администраторы.", ephemeral=True)
+        if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
+            return await i.response.send_message("🔒 Снимать штрафы могут только владелец бота и администраторы сервера.", ephemeral=True)
         rows = await self.bot.db.fetchall("SELECT * FROM fines WHERE guild_id=? AND user_id=? AND COALESCE(cancelled,0)=0 ORDER BY ts DESC", (i.guild_id, member.id))
         if not rows:
             return await i.response.send_message(f"У {member.mention} нет активных штрафов.", ephemeral=True)
@@ -291,8 +291,8 @@ class Fines(commands.Cog):
     @app_commands.rename(member="участник", amount="сумма", reason="причина")
     @app_commands.describe(member="Кому выдать штраф", amount="Сумма штрафа", reason="Причина штрафа")
     async def issue_fine(self, i: discord.Interaction, member: discord.Member, amount: app_commands.Range[float, 0.01, 1e12], reason: str):
-        if not (await self.bot.is_staff(i.user) or await self.bot.has_role_permission(i.user, "fine_issue")):
-            return await i.response.send_message("🔒 У вашей роли нет права выдавать штрафы.", ephemeral=True)
+        if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
+            return await i.response.send_message("🔒 Выдавать штрафы через slash-команду могут только владелец бота и администраторы сервера.", ephemeral=True)
         await i.response.defer(ephemeral=True, thinking=True)
         try:
             fine_id = await self.bot.db.execute(
@@ -317,10 +317,9 @@ class Fines(commands.Cog):
 
     @app_commands.command(name="лог_штрафов", description="Показать последние действия со штрафами")
     @app_commands.describe(количество="Сколько записей показать (1–20)")
-    @app_commands.default_permissions()
     async def fine_audit(self, i: discord.Interaction, количество: app_commands.Range[int, 1, 20] = 10):
-        if not (await self.bot.is_staff(i.user) or i.user.guild_permissions.manage_guild):
-            return await i.response.send_message("🔒 Просматривать журнал штрафов могут только сотрудники.", ephemeral=True)
+        if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
+            return await i.response.send_message("🔒 Просматривать журнал штрафов могут только владелец бота и администраторы сервера.", ephemeral=True)
         rows = await self.bot.db.fetchall("SELECT title,description,ts FROM logs WHERE guild_id=? AND category='fines' ORDER BY id DESC LIMIT ?", (i.guild_id, количество))
         if not rows:
             return await i.response.send_message("Записей в журнале штрафов пока нет.", ephemeral=True, delete_after=18)

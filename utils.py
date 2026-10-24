@@ -38,15 +38,21 @@ def make(title=None, desc=None, color=COLOR["main"], footer=None):
 
 def staff_only():
     async def pred(i):
-        if await i.client.is_staff(i.user):
+        member = i.user
+        if (i.client.is_owner_user(member)
+                or member.guild_permissions.administrator
+                or member.guild_permissions.manage_guild):
             return True
-        raise app_commands.CheckFailure("🔒 Эта команда только для руководства.")
+        raise app_commands.CheckFailure("🔒 Эта команда доступна только владельцу бота и администраторам сервера.")
     return app_commands.check(pred)
 
 def staff_or_permission(permission):
-    """Доступ руководству или роли, которой выдали конкретное право через панель."""
+    """Administrative slash-command guard. Role permissions do not grant access to these commands."""
     async def pred(i):
-        if await i.client.is_staff(i.user) or await i.client.has_role_permission(i.user, permission):
+        member = i.user
+        if (i.client.is_owner_user(member)
+                or member.guild_permissions.administrator
+                or member.guild_permissions.manage_guild):
             return True
-        raise app_commands.CheckFailure("🔒 У вашей роли нет разрешения на это действие.")
+        raise app_commands.CheckFailure("🔒 Эта команда доступна только владельцу бота и администраторам сервера.")
     return app_commands.check(pred)

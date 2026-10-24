@@ -45,7 +45,6 @@ class Admin(commands.Cog):
     @app_commands.rename(type="тип", channel="канал")
     @app_commands.describe(type="Какую функцию настроить", channel="Канал для этой функции")
     @app_commands.choices(type=[app_commands.Choice(name=v, value=k) for k, v in CHANNELS.items()])
-    @app_commands.default_permissions()
     async def setup_channel(self, i, type: app_commands.Choice[str], channel: Union[discord.TextChannel, discord.VoiceChannel]):
         await self.bot.db.set_setting(i.guild_id, type.value, channel.id)
         await self.bot.log(i.guild, "server", "Настройка канала", f"{type.name}: {channel.mention}", i.user)
@@ -58,7 +57,6 @@ class Admin(commands.Cog):
         app_commands.Choice(name="Разрешить доступ", value="add"),
         app_commands.Choice(name="Запретить доступ", value="remove"),
     ])
-    @app_commands.default_permissions()
     async def configure_panel_access(self, i: discord.Interaction, role: discord.Role, action: app_commands.Choice[str]):
         if not (self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild):
             return await i.response.send_message("🔒 Настраивать доступ к панели могут только администраторы сервера.", ephemeral=True)
@@ -79,7 +77,6 @@ class Admin(commands.Cog):
     @app_commands.rename(type="тип", role="роль")
     @app_commands.describe(type="Какую роль настроить", role="Какая роль")
     @app_commands.choices(type=[app_commands.Choice(name=v, value=k) for k, v in ROLES.items()])
-    @app_commands.default_permissions()
     async def setup_role(self, i, type: app_commands.Choice[str], role: discord.Role):
         if type.value in {"accepted_role", "afk_role", "staff_role"}:
             await self.bot.db.set_setting(i.guild_id, type.value, role.id)
@@ -106,7 +103,6 @@ class Admin(commands.Cog):
         app_commands.Choice(name="Добавить", value="add"),
         app_commands.Choice(name="Убрать", value="remove"),
     ])
-    @app_commands.default_permissions()
     async def configure_payment_ping_role(self, i: discord.Interaction, kind: app_commands.Choice[str], role: discord.Role, action: app_commands.Choice[str]):
         key = "treasury_fine_ping_roles" if kind.value == "fine" else "treasury_contract_ping_roles"
         raw = await self.bot.db.get_setting(i.guild_id, key)
@@ -125,7 +121,6 @@ class Admin(commands.Cog):
         await i.response.send_message(f"✅ Роль {role.mention} {verb} для веток: **{kind.name}**.\nТекущий список: {current}", ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     @app_commands.command(name="настроить_логи", description="Автоматически создать категорию с отдельным лог-каналом для каждой функции")
-    @app_commands.default_permissions()
     async def setup_logs(self, i):
         await i.response.defer(ephemeral=True)
         g, db = i.guild, self.bot.db
@@ -161,7 +156,6 @@ class Admin(commands.Cog):
     @app_commands.rename(category="категория", channel="канал")
     @app_commands.describe(category="Для какой функции этот лог-канал", channel="Канал для логов")
     @app_commands.choices(category=[app_commands.Choice(name=f"{CAT[k][0]} {CAT[k][1]}", value=k) for k in LOG_CATS])
-    @app_commands.default_permissions()
     async def setup_log_channel(self, i, category: app_commands.Choice[str], channel: discord.TextChannel):
         await self.bot.db.set_setting(i.guild_id, f"log_{category.value}", channel.id)
         await i.response.send_message(f"✅ Логи «{category.name}» → {channel.mention}", ephemeral=True)
@@ -169,7 +163,6 @@ class Admin(commands.Cog):
     @app_commands.command(name="настроить_процент", description="Процент семьи от суммы гонораров исполнителей (по умолчанию)")
     @app_commands.rename(percent="процент")
     @app_commands.describe(percent="0–100. Процент рассчитывается от суммы гонораров исполнителей")
-    @app_commands.default_permissions()
     async def setup_percent(self, i, percent: app_commands.Range[float, 0.0, 100.0]):
         await self.bot.db.set_setting(i.guild_id, "contract_percent", percent)
         await i.response.send_message(f"✅ Доля семьи установлена: **{percent:g}% от суммы гонораров исполнителей** (для новых контрактов)", ephemeral=True)
@@ -177,13 +170,11 @@ class Admin(commands.Cog):
     @app_commands.command(name="настроить_неактивность", description="Через сколько дней без активности выдавать авто-АФК")
     @app_commands.rename(days="дни")
     @app_commands.describe(days="Число дней (0 — отключить)")
-    @app_commands.default_permissions()
     async def setup_inactive(self, i, days: app_commands.Range[int, 0, 60]):
         await self.bot.db.set_setting(i.guild_id, "inactive_days", days)
         await i.response.send_message("✅ Авто-АФК отключён." if days == 0 else f"✅ Авто-АФК через **{days}** дн. без сообщений и голоса.", ephemeral=True)
 
     @app_commands.command(name="настройки", description="Показать текущие настройки")
-    @app_commands.default_permissions()
     async def settings(self, i):
         lines = []
         for k, v in {**CHANNELS, **ROLES}.items():
