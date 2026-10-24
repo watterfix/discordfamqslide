@@ -47,12 +47,13 @@ def staff_only():
     return app_commands.check(pred)
 
 def staff_or_permission(permission):
-    """Administrative slash-command guard. Role permissions do not grant access to these commands."""
+    """Владелец/администратор или участник с указанным точечным правом роли."""
     async def pred(i):
         member = i.user
         if (i.client.is_owner_user(member)
                 or member.guild_permissions.administrator
-                or member.guild_permissions.manage_guild):
+                or member.guild_permissions.manage_guild
+                or await i.client.has_role_permission(member, permission)):
             return True
-        raise app_commands.CheckFailure("🔒 Эта команда доступна только владельцу бота и администраторам сервера.")
+        raise app_commands.CheckFailure(f"🔒 Недостаточно прав. Требуется право роли: {permission}.")
     return app_commands.check(pred)

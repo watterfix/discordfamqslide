@@ -50,8 +50,11 @@ class VZPPanelView(discord.ui.View):
     async def create_vzp(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not (self.cog.bot.is_owner_user(interaction.user)
                 or interaction.user.guild_permissions.administrator
-                or interaction.user.guild_permissions.manage_guild):
-            return await interaction.response.send_message("🔒 Создавать объявления ВЗП могут только владелец бота и администраторы сервера.", ephemeral=True)
+                or interaction.user.guild_permissions.manage_guild
+                or await self.cog.bot.has_role_permission(interaction.user, "vzp_create")):
+            pass
+        else:
+            return await interaction.response.send_message("🔒 Создавать объявления ВЗП могут только владелец бота, администраторы или роль с правом «Создавать объявления ВЗП» в /панель.", ephemeral=True)
         await interaction.response.send_modal(VZPCreateModal(self.cog))
 
 class VZP(commands.Cog):
@@ -75,8 +78,11 @@ class VZP(commands.Cog):
     async def vzp_panel(self, interaction: discord.Interaction):
         if not (self.bot.is_owner_user(interaction.user)
                 or interaction.user.guild_permissions.administrator
-                or interaction.user.guild_permissions.manage_guild):
-            return await interaction.response.send_message("🔒 Создавать панель ВЗП могут только владелец бота и администраторы сервера.", ephemeral=True)
+                or interaction.user.guild_permissions.manage_guild
+                or await self.bot.has_role_permission(interaction.user, "vzp_create")):
+            pass
+        else:
+            return await interaction.response.send_message("🔒 Создавать панель ВЗП могут только владелец бота, администраторы или роль с правом «Создавать объявления ВЗП» в /панель.", ephemeral=True)
         await interaction.response.send_message(
             "📣 **Панель ВЗП**\nНажми кнопку, чтобы создать сообщение и указать нужное количество реакций.",
             view=VZPPanelView(self), allowed_mentions=discord.AllowedMentions.none()

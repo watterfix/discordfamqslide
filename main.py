@@ -38,9 +38,45 @@ class Tree(app_commands.CommandTree):
             is_owner = getattr(member, "id", None) in Bot.OWNER_IDS
             is_admin = bool(getattr(getattr(member, "guild_permissions", None), "administrator", False)
                             or getattr(getattr(member, "guild_permissions", None), "manage_guild", False))
+            # Команды с делегируемыми точечными правами должны учитывать
+            # назначенные роли и на глобальном уровне CommandTree, иначе до
+            # проверки в cog/декораторе пользователь не дойдёт.
+            command_permissions = {
+                "штраф_выдать": ("fine_issue",),
+                "контракт_закрыть": ("contracts_manage",),
+                "контракт_добавить_исполнителя": ("contracts_manage",),
+                "контракт_убрать_исполнителя": ("contracts_manage",),
+                "контракт_штраф": ("contracts_manage",),
+                "взп_панель": ("vzp_create",),
+                "созыв": ("summon_manage",),
+                "созыв_панель": ("summon_manage",),
+                "машина_добавить": ("fleet_manage",),
+                "машина_списать": ("fleet_manage",),
+                "машина_статус": ("fleet_manage",),
+                "автопарк_пересоздать": ("fleet_manage",),
+                "машина_история": ("fleet_manage",),
+                "афк_вытащить": ("afk_pull",),
+                "фото_машины": ("photos_manage",),
+                "фото_контракта": ("photos_manage",),
+                "фото_заявки": ("photos_manage",),
+                "фото_участника": ("photos_manage",),
+                "фото_удалить": ("photos_manage",),
+                "участник_внести": ("family_manage",),
+                "участник_убрать": ("family_manage",),
+                "общак_выдать": ("family_manage",),
+            }
+            role_allowed = False
             if not (is_owner or is_admin):
+                for permission in command_permissions.get(command_name, ()):
+                    try:
+                        if await i.client.has_role_permission(member, permission):
+                            role_allowed = True
+                            break
+                    except Exception:
+                        logging.exception("Ошибка проверки точечного права %s для /%s", permission, command_name)
+            if not (is_owner or is_admin or role_allowed):
                 await i.response.send_message(
-                    "🔒 Эта slash-команда доступна только владельцу бота и администраторам сервера.",
+                    "🔒 Для этой команды нужны права администратора или соответствующее точечное право роли в /панель.",
                     ephemeral=True)
                 return False
         return True
