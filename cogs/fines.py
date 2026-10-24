@@ -4,7 +4,7 @@ import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
-from utils import make, money, COLOR, staff_only
+from utils import make, money, COLOR, staff_only, staff_or_permission
 
 
 
@@ -265,7 +265,7 @@ class Fines(commands.Cog):
     @app_commands.command(name="штрафы_панель", description="Создать отдельную панель реестра штрафов")
     @app_commands.rename(channel="канал")
     @app_commands.describe(channel="Канал, в котором будет панель штрафов")
-    @staff_only()
+    @staff_or_permission("fine_issue")
     async def fines_panel(self, i: discord.Interaction, channel: discord.TextChannel):
         embed = make("⚖️ Реестр штрафов", "Нажмите **«Выдать штраф»**, выберите участника из списка, затем укажите сумму и причину.\n\nПанель показывает последние 10 штрафов, включая упоминание оштрафованного и того, кто выдал штраф.", COLOR["bad"])
         msg = await channel.send(embed=embed, view=FinePanelView(self.bot))

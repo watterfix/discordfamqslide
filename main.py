@@ -42,28 +42,36 @@ class Tree(app_commands.CommandTree):
             # назначенные роли и на глобальном уровне CommandTree, иначе до
             # проверки в cog/декораторе пользователь не дойдёт.
             command_permissions = {
-                "штраф_выдать": ("fine_issue",),
+                # Штрафы
+                "штраф_выдать": ("fine_issue",), "штрафы_панель": ("fine_issue",),
+                # Контракты
                 "контракт_закрыть": ("contracts_manage",),
                 "контракт_добавить_исполнителя": ("contracts_manage",),
                 "контракт_убрать_исполнителя": ("contracts_manage",),
                 "контракт_штраф": ("contracts_manage",),
-                "взп_панель": ("vzp_create",),
-                "созыв": ("summon_manage",),
-                "созыв_панель": ("summon_manage",),
-                "машина_добавить": ("fleet_manage",),
-                "машина_списать": ("fleet_manage",),
-                "машина_статус": ("fleet_manage",),
-                "автопарк_пересоздать": ("fleet_manage",),
+                "контракты_панель": ("contracts_create", "contracts_manage"),
+                # Оплаты
+                "лог_оплат": ("treasury_contract_review", "treasury_fine_review", "contracts_review"),
+                "срок_веток_оплат": ("treasury_contract_review", "treasury_fine_review"),
+                "казна_панель": ("treasury_contract_review", "treasury_fine_review", "treasury_deposit", "treasury_withdraw"),
+                "общак_панель": ("treasury_deposit", "treasury_withdraw"),
+                "общак_выдать": ("treasury_withdraw",),
+                # Заявки
+                "заявки_панель": ("applications_review",), "заявки_открыть": ("applications_review",),
+                "заявки_закрыть": ("applications_review",), "заявки_статистика": ("applications_review",),
+                # ВЗП / созыв
+                "взп_панель": ("vzp_create",), "созыв": ("summon_manage",), "созыв_панель": ("summon_manage",),
+                # Автопарк
+                "машина_добавить": ("fleet_manage",), "машина_списать": ("fleet_manage",),
+                "машина_статус": ("fleet_manage",), "автопарк_пересоздать": ("fleet_manage",),
                 "машина_история": ("fleet_manage",),
+                # АФК
                 "афк_вытащить": ("afk_pull",),
-                "фото_машины": ("photos_manage",),
-                "фото_контракта": ("photos_manage",),
-                "фото_заявки": ("photos_manage",),
-                "фото_участника": ("photos_manage",),
-                "фото_удалить": ("photos_manage",),
-                "участник_внести": ("family_manage",),
-                "участник_убрать": ("family_manage",),
-                "общак_выдать": ("family_manage",),
+                # Фото
+                "фото_машины": ("photos_manage",), "фото_контракта": ("photos_manage",),
+                "фото_заявки": ("photos_manage",), "фото_участника": ("photos_manage",), "фото_удалить": ("photos_manage",),
+                # Состав семьи
+                "участник_внести": ("family_manage",), "участник_убрать": ("family_manage",),
             }
             role_allowed = False
             if not (is_owner or is_admin):
