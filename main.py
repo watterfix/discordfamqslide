@@ -1,4 +1,5 @@
 import os, time, logging, discord
+from pathlib import Path
 from discord import app_commands
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -32,7 +33,15 @@ class Bot(commands.Bot):
         intents = discord.Intents.default()
         intents.members = intents.message_content = intents.voice_states = True
         super().__init__(command_prefix="!", intents=intents, tree_cls=Tree)
-        self.db = DB(os.getenv("DB_PATH", "bot.db"))
+        # Always resolve relative database paths from the project directory, not
+        # from the process working directory. Otherwise launching the bot from a
+        # shortcut, task scheduler, or a different shell can silently open a new
+        # empty bot.db and make saved role permissions appear to have disappeared.
+        configured_db_path = os.getenv("DB_PATH", "bot.db")
+        db_path = Path(configured_db_path).expanduser()
+        if not db_path.is_absolute():
+            db_path = Path(__file__).resolve().parent / db_path
+        self.db = DB(str(db_path.resolve()))
 
     async def setup_hook(self):
         await self.db.connect()
