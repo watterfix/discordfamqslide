@@ -26,6 +26,12 @@ class Stats(commands.Cog):
         self.bot = bot
         self.refresh.start()
 
+    async def interaction_check(self, i: discord.Interaction):
+        if self.bot.is_owner_user(i.user) or i.user.guild_permissions.administrator or i.user.guild_permissions.manage_guild:
+            return True
+        await i.response.send_message("🔒 Управлять статистикой могут только владелец бота и администраторы сервера.", ephemeral=True)
+        return False
+
     def cog_unload(self):
         self.refresh.cancel()
 
@@ -95,7 +101,7 @@ class Stats(commands.Cog):
     @app_commands.describe(style="Вид каналов статистики")
     @app_commands.choices(style=[app_commands.Choice(name="Голосовые, с эмодзи (рекомендую)", value="voice"),
                                  app_commands.Choice(name="Текстовые, как на скриншоте", value="text")])
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions()
     async def setup_stats(self, i, style: app_commands.Choice[str] = None):
         await i.response.defer(ephemeral=True)
         style, g, db = (style.value if style else "voice"), i.guild, self.bot.db
@@ -118,7 +124,7 @@ class Stats(commands.Cog):
         await i.followup.send("✅ Статистика создана в одной категории. Все 8 счётчиков обновляются раз в минуту. Старые категории статистики удалены.", ephemeral=True)
 
     @app_commands.command(name="статистика_удалить", description="Удалить каналы со статистикой")
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions()
     async def remove_stats(self, i):
         await i.response.defer(ephemeral=True)
         await self._remove(i.guild)

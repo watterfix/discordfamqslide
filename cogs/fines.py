@@ -317,7 +317,7 @@ class Fines(commands.Cog):
 
     @app_commands.command(name="лог_штрафов", description="Показать последние действия со штрафами")
     @app_commands.describe(количество="Сколько записей показать (1–20)")
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions()
     async def fine_audit(self, i: discord.Interaction, количество: app_commands.Range[int, 1, 20] = 10):
         if not (await self.bot.is_staff(i.user) or i.user.guild_permissions.manage_guild):
             return await i.response.send_message("🔒 Просматривать журнал штрафов могут только сотрудники.", ephemeral=True)

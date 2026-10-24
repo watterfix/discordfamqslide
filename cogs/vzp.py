@@ -70,8 +70,10 @@ class VZP(commands.Cog):
         self.bot.add_view(VZPPanelView(self))
 
     @app_commands.command(name="взп_панель", description="Опубликовать панель создания объявлений ВЗП")
-    @app_commands.default_permissions(manage_guild=True)
+    @app_commands.default_permissions()
     async def vzp_panel(self, interaction: discord.Interaction):
+        if not (self.bot.is_owner_user(interaction.user) or interaction.user.guild_permissions.administrator or interaction.user.guild_permissions.manage_guild or await self.bot.is_staff(interaction.user) or await self.bot.has_role_permission(interaction.user, "vzp_create")):
+            return await interaction.response.send_message("🔒 Создавать панель ВЗП могут только владелец бота и назначенные сотрудники.", ephemeral=True)
         await interaction.response.send_message(
             "📣 **Панель ВЗП**\nНажми кнопку, чтобы создать сообщение и указать нужное количество реакций.",
             view=VZPPanelView(self), allowed_mentions=discord.AllowedMentions.none()
